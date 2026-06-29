@@ -1,0 +1,7 @@
+{
+  "sanitizerConfig": {
+    "imgData": "keep",
+    "imgCid": "proxy",
+    "imgHttp": "keep"
+  }
+}
