@@ -1,0 +1,18 @@
+{
+  "servers": {
+    "dropmail": {
+      "type": "stdio",
+      "command": "dropmail-mcp",
+      "env": {
+        "DROPMAIL_TOKEN": "${input:dropmail-token}"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "id": "dropmail-token",
+      "type": "promptString",
+      "description": "DropMail API token (obtain at dropmail.me/api/)",
+      "password": true
+    }
+  ]
