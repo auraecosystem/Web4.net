@@ -1,0 +1,2064 @@
+<!DOCTYPE html>
+<html lang="en">
+ 
+<head>
+    <meta charset="utf-8" />
+    <title>DropMail.me API</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon alternate" href="/favicon.ico" />
+    <link rel="canonical" href="https://dropmail.me/api/" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="Create a temporary email programmatically via our easy API. For 10 minutes or more. Unlimited mailbox size. Attachments allowed." />
+    <link href="../static/lib/bootstrap-5.3.8/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="../static/lib/highlightjs-11.4.0/github.min.css" rel="stylesheet" />
+    <script>
+        var module = {};
+    </script>
+    <script src="https://js-de.sentry-cdn.com/c0eef4f0afea2e70f3e5855b79f44878.min.js" crossorigin="anonymous"></script>
+    <script type="text/javascript" src="/static/lib/js/knockout-3.5.1.min.js" defer></script>
+    <script type="text/javascript" src="/static/lib/bootstrap-5.3.8/js/bootstrap.bundle.min.js" defer></script>
+    <script src="/static/lib/highlightjs-11.4.0/highlightjs.min.js" defer></script>
+    <script src="/static/lib/highlightjs-11.4.0/graphql.js" defer></script>
+ 
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-QH3LNFV6EF"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+ 
+        function gtag() {
+            dataLayer.push(arguments);
+        }
+        gtag('js', new Date());
+        gtag('config', 'G-QH3LNFV6EF', {
+            'linker': {
+                'domains': ['dropmail.me', 'fuckrkn.dropmail.info']
+            }
+        });
+        // Track JS errors
+        window.onerror = (msg, src, line, col, err) => {
+            gtag('event', 'exception', {
+                'description': `msg: ${msg} src: ${src} lineno: ${line} error: ${err}`,
+                'exc_location': `${src}:${line}`,
+                'exc_msg': msg,
+                'fatal': true
+            });
+            return true;
+        };
+    </script>
+    <!-- End Google Analytics -->
+ 
+    <style>
+        h2 {
+            margin-top: 2rem;
+        }
+ 
+        h3 {
+            padding-left: 1rem;
+        }
+ 
+        h4 {
+            padding-left: 1.4rem;
+        }
+ 
+        .run {
+            margin-bottom: .75rem;
+            margin-top: .75rem
+        }
+ 
+        .demo-url {
+            overflow: auto;
+            word-wrap: anywhere;
+        }
+ 
+        code.hljs {
+            padding: 0px !important;
+        }
+ 
+        #navbar-col {
+            position: sticky;
+            top: 0px;
+            height: 100%;
+        }
+ 
+        #navbar {
+            max-height: calc(100vh);
+            overflow-y: auto;
+        }
+ 
+        body {
+            position: relative;
+        }
+ 
+        @keyframes blink-cursor {
+ 
+            0%,
+            92% {
+                opacity: 1;
+            }
+ 
+            96%,
+            100% {
+                opacity: 0;
+            }
+        }
+ 
+        .cursor-blink {
+            display: inline-block;
+            background: #fff;
+            color: #000;
+            width: .6em;
+            animation: blink-cursor 5s step-end infinite;
+        }
+    </style>
+    <script>
+        function apiInit() {
+            "use strict";
+ 
+            function ApiViewModel() {
+                var vm = this;
+                /* var netloc = "https://dropmail.me"; */
+                var wl = window.location,
+                    netloc = wl.protocol + "//" + wl.host,
+                    netlocWS = (wl.protocol == 'https:' ? 'wss:' : 'ws:') + "//" + wl.host,
+                    baseUrl = "/api/graphql/";
+                this.token = ko.observable('')
+                this.noToken = ko.observable(false)
+                this.token.subscribe(function(v) {
+                    if (v.trim()) vm.noToken(false);
+                });
+                this.sessionId = ko.observable(null);
+                this.mailAddress = ko.observable(false);
+ 
+                var randomDomain = {
+                    id: null,
+                    name: "…Random…"
+                };
+                this.domains = ko.observable([randomDomain]);
+                this.selectedDomain = ko.observable(randomDomain);
+ 
+                function URL(observable) {
+                    var params = Object.assign({}, observable());
+                    if (params.hasOwnProperty("variables")) {
+                        params.variables = JSON.stringify(params.variables);
+                    }
+                    return baseUrl + vm.token() + "?" + new URLSearchParams(params).toString();
+                }
+ 
+                function fullURL(observable) {
+                    return netloc + URL(observable);
+                }
+ 
+                function DemoBlock(id, query, handleRun, isSubscription) {
+                    var block = this;
+                    this.id = id + '-block';
+                    this.name = id.replace("-", " ")
+                    this.query = query;
+                    this.runnable = ko.observable(true);
+                    this.result = ko.observable();
+                    this.url = ko.computed(function() {
+                        return fullURL(block.query)
+                    })
+                    this.ready = ko.computed(function() {
+                        return block.query().hasOwnProperty("query")
+                    })
+                    var httpGET = ko.computed(function() {
+                        return ['GET ' + URL(block.query) + ' HTTP/1.1',
+                            'Host: ' + wl.host,
+                            'Accept: application/json\r\n'
+                        ].join('\r\n')
+                    })
+                    var httpPOST = ko.computed(function() {
+                        var json = JSON.stringify(block.query());
+                        return ['POST ' + baseUrl + vm.token() + ' HTTP/1.1',
+                            'Host: ' + wl.host,
+                            'Content-Type: application/json',
+                            'Content-Length: ' + json.length,
+                            'Accept: application/json\r\n',
+                            json
+                        ].join('\r\n');
+                    })
+                    var httpPOSTMultipart = ko.computed(function() {
+                        var json = JSON.stringify(block.query());
+                        return ['POST ' + baseUrl + vm.token() + ' HTTP/1.1',
+                            'Host: ' + wl.host,
+                            'Content-Type: application/json',
+                            'Content-Length: ' + json.length,
+                            'Accept: multipart/mixed\r\n',
+                            json
+                        ].join('\r\n');
+                    })
+                    var curl = ko.computed(function() {
+                        return 'curl ' + netloc + baseUrl + vm.token() + " -H 'Content-Type: application/json' \\\r\n -d '" +
+                            JSON.stringify(block.query()) + "'";
+                    })
+                    var gqlPY = ko.computed(function() {
+                        var q = block.query();
+                        var params = q.variables ? ',\r\n            variable_values=' + JSON.stringify(q.variables) : '';
+                        return ['# See https://gql.readthedocs.io/en/latest/index.html',
+                            'from gql import Client, gql',
+                            'from gql.transport.aiohttp import AIOHTTPTransport',
+                            '',
+                            'token = "' + vm.token() + '"',
+                            'transport = AIOHTTPTransport(url="' + netloc + baseUrl + '" + token)',
+                            'client = Client(transport=transport, fetch_schema_from_transport=True)',
+                            'query = gql("' + q.query + '"' + params + ')',
+                            'result = client.execute(query)',
+                            'print(result)'
+                        ].join('\r\n')
+                    })
+                    var gqlPyWS = ko.computed(function() {
+                        var q = block.query();
+                        var params = q.variables ? ',\r\n            variable_values=' + JSON.stringify(q.variables) : '';
+                        return ['# See https://gql.readthedocs.io/en/latest/transports/websockets.html',
+                            'from gql import Client, gql',
+                            'from gql.transport.websockets import WebsocketsTransport',
+                            '',
+                            'token = "' + vm.token() + '"',
+                            'transport = WebsocketsTransport(url="' + netlocWS + baseUrl + '" + token + "/websocket")',
+                            'client = Client(transport=transport, fetch_schema_from_transport=True)',
+                            'query = gql("' + q.query + '"' + params + ')',
+                            'result = client.execute(query)',
+                            'print(result)'
+                        ].join('\r\n')
+                    })
+                    var gqlPyWSSubscription = ko.computed(function() {
+                        var q = block.query();
+                        var params = q.variables ? ',\r\n            variable_values=' + JSON.stringify(q.variables) : '';
+                        return ['# See https://gql.readthedocs.io/en/latest/transports/websockets.html',
+                            '# See https://gql.readthedocs.io/en/latest/usage/subscriptions.html',
+                            'from gql import Client, gql',
+                            'from gql.transport.websockets import WebsocketsTransport',
+                            '',
+                            'token = "' + vm.token() + '"',
+                            'transport = WebsocketsTransport(url="' + netlocWS + baseUrl + '" + token + "/websocket")',
+                            'client = Client(transport=transport, fetch_schema_from_transport=True)',
+                            'query = gql("' + q.query + '"' + params + ')',
+                            'for mail in client.subscribe(query):',
+                            '    print(result)'
+                        ].join('\r\n')
+                    })
+                    var gqlRequestJS = ko.computed(function() {
+                        var paramsArg = '',
+                            paramsDef = '';
+                        var q = block.query();
+                        if (q.variables) {
+                            paramsDef = '\r\n  const variables = ' + JSON.stringify(q.variables)
+                            paramsArg = ', variables'
+                        }
+                        return ["// See https://github.com/prisma-labs/graphql-request",
+                            "import { request, gql } from 'graphql-request'",
+                            "",
+                            "async function main() {",
+                            "  const token = '" + vm.token() + "'",
+                            "  const endpoint = '" + netloc + baseUrl + "' + token",
+                            "",
+                            "  const query = gql`",
+                            "    " + q.query,
+                            "  `" + paramsDef,
+                            "",
+                            "  const data = await request(endpoint, query" + paramsArg + ")",
+                            "  console.log(JSON.stringify(data, undefined, 2))",
+                            "}",
+                            "main().catch((error) => console.error(error))"
+                        ].join('\r\n')
+                    })
+                    var gqlGraphqlWsJS = ko.computed(function() {
+                        var q = block.query();
+                        return [
+                            "import { createClient } from 'graphql-ws';",
+                            "const token = '" + vm.token() + "'",
+                            "const client = createClient({url: '" + netlocWS + baseUrl + "' + token});",
+                            "(async () => {",
+                            "  const subscription = client.iterate({",
+                            "    query: '" + q.query + "',",
+                            "    variables: " + JSON.stringify(q.variables),
+                            "  });",
+                            "  for await (const event of subscription) {",
+                            "    console.log(event);",
+                            "  }",
+                            "})();"
+                        ].join('\r\n')
+                    })
+                    if (!isSubscription) {
+                        this.snippets = [{
+                                idHead: id + '-get-head',
+                                idTarget: id + '-get-target',
+                                name: "HTTP GET",
+                                lang: 'http',
+                                text: httpGET
+                            },
+                            {
+                                idHead: id + '-post-head',
+                                idTarget: id + '-post-target',
+                                name: "HTTP POST",
+                                lang: 'http',
+                                text: httpPOST
+                            },
+                            {
+                                idHead: id + '-curl-head',
+                                idTarget: id + '-curl-target',
+                                name: "cURL",
+                                lang: 'bash',
+                                text: curl
+                            },
+                            {
+                                idHead: id + '-gql-request-js-head',
+                                idTarget: id + '-gql-request-js-target',
+                                name: "NodeJS 'graphql-request'",
+                                lang: 'javascript',
+                                text: gqlRequestJS
+                            },
+                            {
+                                idHead: id + '-gql-py-head',
+                                idTarget: id + '-gql-py-target',
+                                name: "Python 'gql'",
+                                lang: 'python',
+                                text: gqlPY
+                            },
+                            {
+                                idHead: id + '-gql-py-ws-head',
+                                idTarget: id + '-gql-py-ws-target',
+                                name: "Python 'gql' over WebSocket",
+                                lang: 'python',
+                                text: gqlPyWS
+                            },
+                        ]
+                    } else {
+                        this.snippets = [{
+                                idHead: id + '-get-head',
+                                idTarget: id + '-get-target',
+                                name: "HTTP GET",
+                                lang: 'http',
+                                text: httpGET
+                            },
+                            {
+                                idHead: id + '-post-head',
+                                idTarget: id + '-post-target',
+                                name: "HTTP POST",
+                                lang: 'http',
+                                text: httpPOST
+                            },
+                            {
+                                idHead: id + '-post-multipart-head',
+                                idTarget: id + '-post-multipart-target',
+                                name: "HTTP POST multipart/mixed",
+                                lang: 'http',
+                                text: httpPOSTMultipart
+                            },
+                            {
+                                idHead: id + '-gql-graphql-ws-js-head',
+                                idTarget: id + '-gql-graphql-ws-request-js-target',
+                                name: "NodeJS 'graphql_ws'",
+                                lang: 'javascript',
+                                text: gqlGraphqlWsJS
+                            },
+                            {
+                                idHead: id + '-gql-py-ws-sub-head',
+                                idTarget: id + '-gql-py-ws-sub-target',
+                                name: "Python 'gql' subscription over WebSocket",
+                                lang: 'python',
+                                text: gqlPyWSSubscription
+                            },
+                        ]
+                    }
+                    this.run = function(e) {
+                        gtag('event', 'run_demo_query', {
+                            'event_category': 'api',
+                            'event_label': block.id
+                        });
+                        if (!vm.token().trim()) {
+                            vm.noToken(true);
+                            block.result({
+                                __noToken: true
+                            });
+                            return;
+                        }
+                        vm.noToken(false);
+                        block.runnable(false);
+                        fetch(block.url(), {
+                                headers: {
+                                    Accept: 'application/json'
+                                }
+                            })
+                            .then(function(res) {
+                                return res.json();
+                            })
+                            .then(function(resp) {
+                                block.result(resp);
+                                if (handleRun) {
+                                    handleRun(resp);
+                                }
+                                highlightThis();
+                            })
+                            .catch(function() {
+                                alert("error");
+                            })
+                            .finally(function() {
+                                block.runnable(true);
+                            });
+                    }
+ 
+                    function highlightThis() {
+                        var el = document.getElementById(block.id);
+                        if (!el) return;
+                        el.parentElement.querySelectorAll('pre > code').forEach((e) => {
+                            hljs.highlightElement(e);
+                        })
+                    }
+                    var snippetTracker = ko.computed(function() {
+                        return block.snippets.map(function(s) {
+                            return s.text()
+                        }) + vm.token()
+                    }).extend({
+                        rateLimit: 300
+                    });
+                    snippetTracker.subscribe(highlightThis)
+                }
+ 
+ 
+                this.listDomains = new DemoBlock(
+                    "list-domains",
+                    ko.observable({
+                        query: "query {domains {id, name, introducedAt, expiresAt, availableVia}}"
+                    }),
+                    function(result) {
+                        var allDomains = [randomDomain].concat(
+                            result.data.domains.map(function(domain) {
+                                return {
+                                    id: domain.id,
+                                    name: domain.name + " (id=" + domain.id + ")"
+                                }
+                            }));
+                        vm.domains(allDomains)
+                    });
+ 
+                this.introduceSession = new DemoBlock(
+                    "introduce-session",
+                    ko.observable({
+                        query: "mutation {introduceSession {id, expiresAt, addresses {address}}}"
+                    }),
+                    function(result) {
+                        vm.sessionId(result.data.introduceSession.id);
+                        vm.mailAddress(result.data.introduceSession.addresses[0].address);
+                    });
+                this.querySessions = new DemoBlock(
+                    "query-sessions",
+                    ko.observable({
+                        query: "query {sessions {id, expiresAt, mails {rawSize, fromAddr, toAddr, downloadUrl, text, headerSubject}}}"
+                    }));
+                this.introduceAddress = new DemoBlock(
+                    "introduce-address",
+                    ko.computed(function() {
+                        if (!vm.sessionId()) return {};
+                        var selectedDomain = vm.selectedDomain();
+                        var query = "mutation ($input: IntroduceAddressInput!) {introduceAddress(input: $input) {address, restoreKey}}";
+                        if (selectedDomain.id) {
+                            return {
+                                query: query,
+                                variables: {
+                                    input: {
+                                        sessionId: vm.sessionId(),
+                                        domainId: selectedDomain.id
+                                    }
+                                }
+                            }
+                        } else {
+                            return {
+                                query: query,
+                                variables: {
+                                    input: {
+                                        sessionId: vm.sessionId()
+                                    }
+                                }
+                            }
+                        }
+                    }));
+                this.querySession = new DemoBlock(
+                    "query-session",
+                    ko.computed(function() {
+                        if (!vm.sessionId()) return {};
+                        return {
+                            query: "query ($id: ID!) {session(id:$id) { " +
+                                "addresses {address}, " +
+                                "mails{rawSize, fromAddr, toAddr, downloadUrl, text, headerSubject}} }",
+                            variables: {
+                                id: vm.sessionId()
+                            }
+                        };
+                    }));
+                this.subscribeSession = new DemoBlock(
+                    "subscribe-session",
+                    ko.computed(function() {
+                        if (!vm.sessionId()) return {};
+                        return {
+                            query: "subscription ($id: ID!) {sessionMailReceived(id:$id) { " +
+                                "rawSize, fromAddr, toAddr, downloadUrl, text, headerSubject} }",
+                            variables: {
+                                id: vm.sessionId()
+                            }
+                        };
+                    }),
+                    null,
+                    true
+                );
+ 
+                function QueryEdit() {
+                    var self = this;
+                    var defaultQ = {
+                        query: ["query mailWithHtml($sanitizerConfig: HtmlSanitizerConfig) {",
+                            "  sessions {",
+                            "    mails {",
+                            "      fromAddr",
+                            "      headerSubject",
+                            "      text",
+                            "      sanitizedHtml(sanitizerConfig: $sanitizerConfig)",
+                            "    }",
+                            "  }",
+                            "}"
+                        ].join("\r\n"),
+                        variables: JSON.stringify({
+                                sanitizerConfig: {
+                                    imgData: "keep",
+                                    imgCid: "proxy",
+                                    imgHttp: "keep"
+                                }
+                            },
+                            null,
+                            2
+                        )
+                    };
+                    this.select = ko.computed(function() {
+                        return [vm.listDomains, vm.introduceSession, vm.querySessions, vm.introduceAddress, vm.querySession].filter(
+                            function(block) {
+                                return block.ready()
+                            }
+                        )
+                    });
+                    this.selected = ko.observable();
+                    this.query = ko.observable(defaultQ.query).extend({
+                        rateLimit: 1000,
+                        method: "notifyWhenChangesStop"
+                    })
+                    this.variables = ko.observable(defaultQ.variables).extend({
+                        rateLimit: 1000,
+                        method: "notifyWhenChangesStop"
+                    });
+                    this.error = ko.observable();
+ 
+                    this.selected.subscribe(function(v) {
+                        if (v && v.query() && (v.query().query != defaultQ.query)) {
+                            var q = v.query();
+                            self.query(q.query);
+                            self.variables(q.variables ? JSON.stringify(q.variables, null, 2) : '');
+                        }
+                    })
+                }
+                this.queryEdit = new QueryEdit();
+                this.queryEditor = new DemoBlock(
+                    "query-editor",
+                    ko.computed(function() {
+                        var vars = vm.queryEdit.variables().trim();
+                        var queryObj = {
+                            query: vm.queryEdit.query().replace(/\s+/g, " ").trim()
+                        };
+                        if (vars) {
+                            try {
+                                queryObj.variables = JSON.parse(vars);
+                                vm.queryEdit.error(null);
+                            } catch (e) {
+                                vm.queryEdit.error("Incorrect variables syntax")
+                            }
+                        };
+                        return queryObj
+                    })
+                );
+                /* Helper */
+                this.captcha = new ApiCaptcha();
+                this.tokenGen = new TokenGenerator(vm, vm.captcha);
+                this.tokenRenew = new TokenRenewer(vm, vm.captcha);
+                this.json = function(a) {
+                    var v = a();
+                    if (v && v.__noToken) return '⚠ No API token — generate one above ↑';
+                    return JSON.stringify(v, null, 2);
+                }
+            };
+ 
+            function ApiCaptcha(modalId) {
+                var self = this,
+                    modalEl = document.querySelector(modalId || "#api-captcha-modal"),
+                    bsModal = new bootstrap.Modal(modalEl, {
+                        backdrop: 'static',
+                        keyboard: false
+                    });
+                this.submitting = ko.observable(false);
+                this.visible = ko.observable(false);
+                this.response = ko.observable("");
+                this.lastError = ko.observable(null);
+                this.isWrong = ko.observable(false);
+                this.params = ko.observable(null);
+                this.refresher = ko.observable(0);
+                this.url = ko.computed(function() {
+                    var params = self.params(),
+                        refresher = self.refresher();
+                    if (!params) return null;
+                    params = Object.assign({
+                        "_r": refresher
+                    }, params);
+                    return "/captcha/image.png?" + new URLSearchParams(params).toString();
+                });
+                this.show = function(params) {
+                    if (self._reject) self._reject(new Error('Cancelled'));
+                    self.params(params);
+                    self.visible(true);
+                    self.response("");
+                    self.isWrong(false);
+                    self.lastError(null);
+                    return new Promise(function(resolve, reject) {
+                        self._resolve = resolve;
+                        self._reject = reject;
+                    });
+                };
+                this.reload = function() {
+                    self.refresher(self.refresher() + 1);
+                };
+                this.submit = function() {
+                    if (self.submitting()) return false;
+                    var params = Object.assign({
+                        response: self.response()
+                    }, self.params());
+                    self.submitting(true);
+                    fetch("/captcha/solution", {
+                            method: 'POST',
+                            body: new URLSearchParams(params)
+                        })
+                        .then(function(res) {
+                            if (res.ok) {
+                                self.visible(false);
+                                self.submitting(false);
+                                self.params(null);
+                                self.response("");
+                                self.lastError(null);
+                                self.isWrong(false);
+                                if (self._resolve) self._resolve();
+                            } else {
+                                self.submitting(false);
+                                self.isWrong(true);
+                                if (res.status == 422) {
+                                    self.lastError(self.response());
+                                } else {
+                                    self.lastError(null);
+                                    self.refresher(self.refresher() + 1);
+                                    self.response("");
+                                }
+                            }
+                        })
+                        .catch(function() {
+                            self.submitting(false);
+                            self.lastError(null);
+                            self.refresher(self.refresher() + 1);
+                            self.response("");
+                        });
+                    return false;
+                };
+                this.visible.subscribe(function(newVal) {
+                    if (newVal) {
+                        bsModal.show();
+                    } else {
+                        bsModal.hide();
+                    }
+                });
+                this.response.subscribe(function(newVal) {
+                    self.isWrong(newVal == self.lastError());
+                });
+                modalEl.addEventListener('shown.bs.modal', function() {
+                    document.getElementById('api-captcha-text').focus();
+                });
+            }
+ 
+            function TokenGenerator(mainVm, captcha) {
+                var self = this;
+                this.captcha = captcha;
+                this.lifetime = ko.observable('1d');
+                this.submitting = ko.observable(false);
+                this.generatedToken = ko.observable(null);
+                this.error = ko.observable(null);
+                this.copied = ko.observable(false);
+ 
+                function doGenerate() {
+                    self.submitting(true);
+                    self.error(null);
+                    fetch('/api/token/generate', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            type: 'af',
+                            lifetime: self.lifetime()
+                        })
+                    }).then(function(res) {
+                        return res.json().then(function(resp) {
+                            return {
+                                res,
+                                resp
+                            };
+                        });
+                    }).then(function({
+                        res,
+                        resp
+                    }) {
+                        self.submitting(false);
+                        if (res.ok) {
+                            self.generatedToken(resp.token);
+                            mainVm.token(resp.token);
+                        } else if (res.status === 402 && resp && resp.captcha) {
+                            self.captcha.show(resp.captcha).then(function() {
+                                doGenerate();
+                            }).catch(function() {
+                                self.error("Captcha was cancelled.");
+                            });
+                        } else if (resp && resp.error) {
+                            self.error(resp.error);
+                        } else {
+                            self.error("Request failed. Please try again.");
+                        }
+                    }).catch(function() {
+                        self.submitting(false);
+                        self.error("Request failed. Please try again.");
+                    });
+                }
+                this.submit = function() {
+                    gtag('event', 'generate_token', {
+                        'event_category': 'api'
+                    });
+                    if (self.submitting()) return false;
+                    doGenerate();
+                    return false;
+                };
+                this.copyToken = function() {
+                    var t = self.generatedToken();
+                    if (!t) return;
+                    if (navigator.clipboard) {
+                        navigator.clipboard.writeText(t).then(function() {
+                            self.copied(true);
+                            setTimeout(function() {
+                                self.copied(false);
+                            }, 2000);
+                        });
+                    } else {
+                        var el = document.createElement('textarea');
+                        el.value = t;
+                        document.body.appendChild(el);
+                        el.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(el);
+                        self.copied(true);
+                        setTimeout(function() {
+                            self.copied(false);
+                        }, 2000);
+                    }
+                };
+            }
+ 
+            function TokenRenewer(mainVm, captcha) {
+                var self = this;
+                this.captcha = captcha;
+                this.lifetime = ko.observable('1d');
+                this.inputToken = ko.observable('');
+                this.submitting = ko.observable(false);
+                this.renewedToken = ko.observable(null);
+                this.error = ko.observable(null);
+                this.copied = ko.observable(false);
+ 
+                function doRenew() {
+                    self.submitting(true);
+                    self.error(null);
+                    self.renewedToken(null);
+                    fetch('/api/token/renew', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            token: self.inputToken().trim(),
+                            lifetime: self.lifetime()
+                        })
+                    }).then(function(res) {
+                        return res.json().then(function(resp) {
+                            return {
+                                res,
+                                resp
+                            };
+                        });
+                    }).then(function({
+                        res,
+                        resp
+                    }) {
+                        self.submitting(false);
+                        if (res.ok) {
+                            self.renewedToken(resp.token);
+                            mainVm.token(resp.token);
+                        } else if (res.status === 402 && resp && resp.captcha) {
+                            self.captcha.show(resp.captcha).then(function() {
+                                doRenew();
+                            }).catch(function() {
+                                self.error("Captcha was cancelled.");
+                            });
+                        } else if (resp && resp.error === 'token_expired') {
+                            self.error("Your token has already expired — please generate a new one instead.");
+                        } else if (resp && resp.error === 'invalid_token') {
+                            self.error("Token not recognised — please check and try again.");
+                        } else if (resp && resp.error) {
+                            self.error(resp.error);
+                        } else {
+                            self.error("Request failed. Please try again.");
+                        }
+                    }).catch(function() {
+                        self.submitting(false);
+                        self.error("Request failed. Please try again.");
+                    });
+                }
+                this.submit = function() {
+                    gtag('event', 'renew_token', {
+                        'event_category': 'api'
+                    });
+                    if (self.submitting()) return false;
+                    doRenew();
+                    return false;
+                };
+                this.copyToken = function() {
+                    var t = self.renewedToken();
+                    if (!t) return;
+                    if (navigator.clipboard) {
+                        navigator.clipboard.writeText(t).then(function() {
+                            self.copied(true);
+                            setTimeout(function() {
+                                self.copied(false);
+                            }, 2000);
+                        });
+                    } else {
+                        var el = document.createElement('textarea');
+                        el.value = t;
+                        document.body.appendChild(el);
+                        el.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(el);
+                        self.copied(true);
+                        setTimeout(function() {
+                            self.copied(false);
+                        }, 2000);
+                    }
+                };
+            }
+            var viewModel = new ApiViewModel();
+            ko.applyBindings(viewModel);
+            hljs.registerLanguage("graphql", window.hljsDefineGraphQL);
+            hljs.highlightAll();
+            //$('.collapse').collapse()
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', apiInit);
+        } else {
+            apiInit();
+        }
+    </script>
+</head>
+ 
+<body data-bs-spy="scroll" data-bs-offset="50" data-bs-target="#navbar">
+    <div class="container-fluid">
+        <div class="row">
+            <div id="navbar-col" class="col-lg-3 d-none d-lg-block">
+                <nav id="navbar" class="navbar navbar-light bg-light">
+                    <a class="navbar-brand" href="#">
+                        <img src="/static/img/icon-80x80.png" width="30" height="30" class="d-inline-block align-top" alt="Logo">
+                        DropMail.me API
+                    </a>
+                    <nav class="nav flex-column">
+                        <a class="nav-link" href="#get-token">Get a free token</a>
+                        <a class="nav-link" href="#whats-new">News</a>
+                        <a class="nav-link" href="#object-model">Object model</a>
+                        <a class="nav-link" href="#workflow">Workflow</a>
+                        <nav class="nav nav-pills flex-column">
+                            <a class="nav-link ms-3 my-1" href="#create-session-single-random-address">
+                                Creating a Session with single random Address
+                            </a>
+                            <a class="nav-link ms-3 my-1" href="#fetch-incoming-mail">
+                                Fetching the incoming mail
+                            </a>
+                            <a class="nav-link ms-3 my-1" href="#custom-address">
+                                Custom addresses
+                            </a>
+                            <a class="nav-link ms-3 my-1" href="#personal-domains">
+                                Personal domains
+                            </a>
+                        </nav>
+                        <a class="nav-link" href="#errors">Errors</a>
+                        <nav class="nav nav-pills flex-column">
+                            <a class="nav-link ms-3 my-1" href="#errors-http">HTTP 403</a>
+                            <a class="nav-link ms-3 my-1" href="#errors-graphql">GraphQL errors</a>
+                            <a class="nav-link ms-3 my-1" href="#rate-limiting">Rate Limiting</a>
+                        </nav>
+                        <a class="nav-link" href="#live-demo">Try it from your browser!</a>
+                        <nav class="nav nav-pills flex-column">
+                            <a class="nav-link ms-3 my-1" href="#list-domains">List domains</a>
+                            <a class="nav-link ms-3 my-1" href="#introduce-session">Introduce session</a>
+                            <a class="nav-link ms-3 my-1" href="#list-all-sessions">List all sessions</a>
+                            <a class="nav-link ms-3 my-1" href="#add-another-address">
+                                Add one more address to the session
+                            </a>
+                            <a class="nav-link ms-3 my-1" href="#query-specific-session">
+                                Query a specific session
+                            </a>
+                            <a class="nav-link ms-3 my-1" href="#subscribe-to-session-mail">
+                                Subscribe to new session mail
+                            </a>
+                            <a class="nav-link ms-3 my-1" href="#query-editor">Try your own query</a>
+                        </nav>
+                        <a class="nav-link" href="#code-examples">Code examples</a>
+                        <nav class="nav nav-pills flex-column">
+                            <a class="nav-link ms-3 my-1" href="#curl-new-session-with-random-address">
+                                Creating a new session with random email address
+                            </a>
+                            <a class="nav-link ms-3 my-1" href="#curl-fetching-received-mail">
+                                Fetching received emails
+                            </a>
+                        </nav>
+                        <a class="nav-link" href="#mcp">MCP (AI agents)</a>
+                        <nav class="nav nav-pills flex-column">
+                            <a class="nav-link ms-3 my-1" href="#mcp-example">Example session</a>
+                            <a class="nav-link ms-3 my-1" href="#mcp-setup">Configure your AI assistant</a>
+                            <a class="nav-link ms-3 my-1" href="#mcp-tools">Available tools</a>
+                            <a class="nav-link ms-3 my-1" href="#mcp-download">Download</a>
+                        </nav>
+                    </nav>
+                </nav>
+            </div>
+            <main class="col col-lg-9 py-md-3 pe-md-5">
+                <h1 id="top"><a href="/">DropMail.me</a> API</h1>
+                <div class="bg-light rounded py-4 px-4 mb-3">
+                    <p class="lead mb-3">
+                        Programmatically create disposable email addresses, receive messages in real time,
+                        and read their contents — no sign-up, no spam, no strings attached.
+                        Ideal for automated testing, onboarding flows, and AI agents that need a live inbox.
+                    </p>
+                    <div class="row text-center">
+                        <div class="col-6 col-md-3 mb-2">
+                            <div class="border rounded py-2 px-1 h-100">
+                                <strong>No sign-up</strong><br />
+                                <small class="text-muted">Free tokens, no account needed</small>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-3 mb-2">
+                            <div class="border rounded py-2 px-1 h-100">
+                                <strong>GraphQL API</strong><br />
+                                <small class="text-muted">Flexible queries & subscriptions</small>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-3 mb-2">
+                            <div class="border rounded py-2 px-1 h-100">
+                                <strong>Real-time</strong><br />
+                                <small class="text-muted">WebSocket & long-poll push</small>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-3 mb-2">
+                            <div class="border rounded py-2 px-1 h-100">
+                                <strong>MCP-ready</strong><br />
+                                <small class="text-muted">Works with AI assistants</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <dl class="row mb-2">
+                    <dt class="col-sm-3">HTTP endpoint</dt>
+                    <dd class="col-sm-9"><code>https://dropmail.me/api/graphql/${AUTH_TOKEN}</code></dd>
+ 
+                    <dt class="col-sm-3">WebSocket endpoint</dt>
+                    <dd class="col-sm-9"><code>wss://dropmail.me/api/graphql/${AUTH_TOKEN}/websocket</code></dd>
+ 
+                    <dt class="col-sm-3">Format</dt>
+                    <dd class="col-sm-9"><a href="https://graphql.org/">GraphQL</a> · <a href="/api/schema.graphql" class="fw-bold">schema.graphql ↓</a></dd>
+ 
+                    <dt class="col-sm-3">Auth</dt>
+                    <dd class="col-sm-9">Free <code>af_…</code> token as <code>${AUTH_TOKEN}</code> — no sign-up required. <a href="#get-token">Get yours ↓</a></dd>
+                </dl>
+                <details class="mb-4">
+                    <summary class="text-muted" style="cursor:pointer;">HTTP & WebSocket transport details</summary>
+                    <div class="mt-2">
+                        <p><b>HTTP</b> endpoint expects standard GraphQL parameters: <code>query</code>, <code>variables</code>, <code>operationName</code> and <code>extensions</code>. Only <code>query</code> is mandatory.</p>
+                        <p>Both <code>GET</code> and <code>POST</code> methods could be used. For <code>GET</code> just add URL-encoded parameters as query string: <code>/api/graphql/MY_TOKEN?query=…&variables=…</code> (<code>variables</code> should be a JSON object). <code>POST</code> accepts <code>application/json</code> and <code>application/x-www-form-urlencoded</code>; if no <code>Content-Type</code> header is provided, the body is assumed to be JSON. See <a href="https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md">detailed specification</a>.</p>
+                        <p>Response format is <code>application/json</code> by default, or streamed <code>multipart/mixed</code> when you send <code>Accept: multipart/mixed</code> (useful for subscriptions). See <a href="https://github.com/graphql/graphql-over-http/blob/main/rfcs/IncrementalDelivery.md">detailed specification</a>.</p>
+                        <p><b>WebSocket</b> endpoint supports both <a href="https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md">graphql-ws</a> and <a href="https://github.com/apollographql/subscriptions-transport-ws/blob/master/PROTOCOL.md">Apollo</a> protocols (negotiated via <code>Sec-WebSocket-Protocol</code>). Consult your GraphQL client library for details.</p>
+                    </div>
+                </details>
+                <p class="lead text-center"><a href="#live-demo" class="btn btn-primary btn-lg d-block">Try it now from your browser!</a></p>
+ 
+                <p><strong>Want to use DropMail from an AI assistant?</strong> There is an <a href="#mcp">MCP server package</a> that exposes DropMail as tools — no GraphQL knowledge needed.</p>
+ 
+                <div class="card mb-3" style="border-left: 4px solid #6f42c1;">
+                    <div class="card-body py-2">
+                        <pre class="bg-dark text-light p-2 rounded mb-2" style="font-size:0.8em">❯ Sign me up for the free trial at example.com and give me the confirmation code<span class="cursor-blink"> </span>
+ 
+● create_session  → tmpbox47@dropmail.me
+● wait_for_email  → 📬 "Verify your email address" from promo@example.com arrived
+● read_email      → Your code: <b>482-951</b></pre>
+                        <a href="#mcp" class="card-link">Learn more about the MCP package ↓</a>
+                    </div>
+                </div>
+ 
+                <h2 id="get-token">Get a free API token</h2>
+                <p>
+                    Free tokens (<code>af_…</code>) let you use the API without a sign-up. No account required.
+                </p>
+                <div class="alert alert-warning py-2" role="alert">
+                    <strong>Legacy arbitrary-string tokens are no longer accepted.</strong> Please generate
+                    a free <code>af_</code> token below instead.
+                </div>
+                <div class="alert alert-danger py-2" role="alert">
+                    <strong>⚠ Action required — if you generated an <code>af_…</code> token before 5 April 2026,
+                        please generate a new one immediately.</strong>
+                    Tokens issued before that date were corrupted due to a server-side bug and should no longer
+                    be used. Use the form below to get a fresh token, then replace the old one everywhere you
+                    use it. <strong>Renewing</strong> an existing token is <em>not</em> sufficient —
+                    you must generate a brand-new one.
+                </div>
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <form data-bind="submit: tokenGen.submit">
+                            <div class="mb-3">
+                                <label for="token-lifetime"><strong>Token duration</strong></label>
+                                <select id="token-lifetime" class="form-select" style="max-width: 22rem" data-bind="value: tokenGen.lifetime, disable: tokenGen.submitting">
+                                    <option value="1h">1 hour</option>
+                                    <option value="1d">1 day</option>
+                                    <option value="7d">7 days (captcha)</option>
+                                    <option value="30d">30 days (captcha)</option>
+                                    <option value="90d">90 days (captcha)</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary" data-bind="disable: tokenGen.submitting">
+                                <!-- ko if: tokenGen.submitting -->Generating…
+                                <!-- /ko -->
+                                <!-- ko ifnot: tokenGen.submitting -->Generate token
+                                <!-- /ko -->
+                            </button>
+                        </form>
+                        <!-- ko if: tokenGen.error -->
+                        <div class="alert alert-danger mt-3" data-bind="text: tokenGen.error"></div>
+                        <!-- /ko -->
+                        <!-- ko if: tokenGen.generatedToken -->
+                        <div class="mt-3">
+                            <label><strong>Your token:</strong></label>
+                            <div class="input-group" style="max-width: 38rem">
+                                <input type="text" class="form-control font-monospace" readonly data-bind="value: tokenGen.generatedToken" />
+                                <button class="btn btn-outline-secondary" type="button" data-bind="click: tokenGen.copyToken">
+                                    <!-- ko if: tokenGen.copied -->Copied!
+                                    <!-- /ko -->
+                                    <!-- ko ifnot: tokenGen.copied -->Copy
+                                    <!-- /ko -->
+                                </button>
+                            </div>
+                            <small class="text-muted">Keep this token secret — it identifies your usage for rate-limiting. Token also auto-filled in the <a href="#live-demo">live demo</a> below.</small>
+                        </div>
+                        <!-- /ko -->
+                    </div>
+                </div>
+ 
+                <div class="card mb-3">
+                    <div class="card-header"><strong>Renew existing token</strong></div>
+                    <div class="card-body">
+                        <p class="card-text text-muted">Renewing preserves your token's identity — any resources you created with the old token (e.g. personal domains) remain accessible with the new one.</p>
+                        <form data-bind="submit: tokenRenew.submit">
+                            <div class="mb-3">
+                                <label for="renew-token-input">Paste your current <code>af_…</code> token</label>
+                                <input type="text" id="renew-token-input" class="form-control font-monospace" placeholder="af_…" data-bind="textInput: tokenRenew.inputToken, disable: tokenRenew.submitting" />
+                            </div>
+                            <div class="mb-3">
+                                <label for="renew-token-lifetime"><strong>New duration</strong></label>
+                                <select id="renew-token-lifetime" class="form-select" style="max-width: 22rem" data-bind="value: tokenRenew.lifetime, disable: tokenRenew.submitting">
+                                    <option value="1h">1 hour</option>
+                                    <option value="1d">1 day</option>
+                                    <option value="7d">7 days (captcha)</option>
+                                    <option value="30d">30 days (captcha)</option>
+                                    <option value="90d">90 days (captcha)</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-outline-primary" data-bind="disable: tokenRenew.submitting">
+                                <!-- ko if: tokenRenew.submitting -->Renewing…
+                                <!-- /ko -->
+                                <!-- ko ifnot: tokenRenew.submitting -->Renew token
+                                <!-- /ko -->
+                            </button>
+                        </form>
+                        <!-- ko if: tokenRenew.error -->
+                        <div class="alert alert-danger mt-3">
+                            <span data-bind="text: tokenRenew.error"></span>
+                            <!-- ko if: tokenRenew.error() && tokenRenew.error().indexOf('expired') >= 0 -->
+                            <a href="#get-token">Generate a new one.</a>
+                            <!-- /ko -->
+                        </div>
+                        <!-- /ko -->
+                        <!-- ko if: tokenRenew.renewedToken -->
+                        <div class="mt-3">
+                            <label><strong>Your renewed token:</strong></label>
+                            <div class="input-group" style="max-width: 38rem">
+                                <input type="text" class="form-control font-monospace" readonly data-bind="value: tokenRenew.renewedToken" />
+                                <button class="btn btn-outline-secondary" type="button" data-bind="click: tokenRenew.copyToken">
+                                    <!-- ko if: tokenRenew.copied -->Copied!
+                                    <!-- /ko -->
+                                    <!-- ko ifnot: tokenRenew.copied -->Copy
+                                    <!-- /ko -->
+                                </button>
+                            </div>
+                            <small class="text-muted">This token is a successor to your previous one — it has the same access rights, including any personal domains you added. Token also auto-filled in the <a href="#live-demo">live demo</a> below.</small>
+                        </div>
+                        <!-- /ko -->
+                    </div>
+                </div>
+ 
+                <h2 id="whats-new">News</h2>
+                <dl>
+                    <dt>2026-06-04</dt>
+                    <dd>Legacy arbitrary-string anonymous tokens are now <strong>completely disabled</strong>.
+                        Please <a href="#get-token">switch to a free <code>af_…</code> token</a>.</dd>
+ 
+                    <dt>2026-05-04</dt>
+                    <dd>As announced in February, legacy arbitrary-string anonymous tokens are now limited to
+                        about <strong>1 address per minute</strong>, can receive only about <strong>1 mail per minute</strong>,
+                        have a fixed <strong>7-second delay per API call</strong>, and will be <strong>completely disabled
+                            in 1 week</strong>. Please <a href="#get-token">switch to a free <code>af_…</code> token</a>,
+                        which allow about 1000-times more requests.</dd>
+ 
+                    <dt>2026-04-05</dt>
+                    <dd><strong>Action required for <code>af_…</code> token holders:</strong> tokens generated
+                        before 5 April 2026 were corrupted due to a server-side bug.
+                        Please <a href="#get-token">generate a fresh token</a> and replace the old one —
+                        renewing is <em>not</em> sufficient.</dd>
+ 
+                    <dt>2026-03-08</dt>
+                    <dd><a href="#rotating-domains">Rotating domains</a> — some domains now have a known DNS expiry date (<code>Domain.expiresAt</code>). Within 30 days of expiry they are excluded from random selection but still usable when chosen explicitly; after expiry the domain is gone entirely. Pass <code>permanentDomainOnly: true</code> in mutations or use <code>domains(permanentOnly: true)</code> to restrict to permanent domains. Rotating domains tend to be freshly registered and less likely to be spam-blocked — good for short-lived use cases.</dd>
+ 
+                    <dt>2026-02-21</dt>
+                    <dd>Free <a href="#get-token">API tokens</a> (<code>af_…</code>) introduced — no sign-up required. Using arbitrary strings as tokens is now deprecated and will stop working in April 2026.</dd>
+ 
+                    <dt>2026-02-20</dt>
+                    <dd><a href="#mcp">MCP server package</a> released — use DropMail directly from AI assistants like Claude Desktop, VS Code Copilot, and GitHub Copilot CLI. Available on <a href="https://pypi.org/project/dropmail-mcp/" target="_blank">PyPI</a>.</dd>
+ 
+                    <dt>2026-02-12</dt>
+                    <dd>Introducing gentle <a href="#rate-limiting">rate-limits</a>. No worries, they are quite high (hundreds per-minute).</dd>
+ 
+                    <dt>2025-05-29</dt>
+                    <dd>You can add your own domains to DropMail with <a href="#personal-domains">personal domains</a>. In case public DropMail domains are banned</dd>
+ 
+                    <dt>2023-11-28</dt>
+                    <dd>More efficient way to get notified about new incoming mail - <a href="#subscriptions">subscriptions</a></dd>
+ 
+                    <dt>2023-10-24</dt>
+                    <dd>Now <code>Session.mails</code> and <code>Session.mailsAfterId</code> only returns up to 100 mails. To get more use <code>Session.mailsConnection</code></dd>
+ 
+                    <dt>2022-02-12</dt>
+                    <dd>WebSocket transport added</dd>
+                </dl>
+ 
+                <h2 id="object-model">Object model</h2>
+                <dl>
+                    <dt>Domain</dt>
+                    <dd>Domain name, like <code>@dropmail.me</code> or <code>@10mail.org</code> for which you can crate email <code>Address</code>es. Some domains are only available via API, see <code>Domain.availableVia</code>. You may also <a href="#personal-domains">add your own domains</a> (you'd need to set-up DNS records and call <code>addDomain</code> mutation).</dd>
+ 
+                    <dt>Session</dt>
+                    <dd>Is a server-side storage unit. It stores <code>Address</code>es and incoming <code>Mail</code>s. It has limited lifetime - when session expires all its <code>Address</code>es and <code>Mail</code>s are removed from the server. You can create multiple <code>Session</code>s and attach multiple <code>Address</code>es to each <code>Session</code>. By default session's lifetime is 10min and extended each time you access it (by making any query that reads or writes some data to it).</dd>
+ 
+                    <dt>Address</dt>
+                    <dd>Email address, like <code>user@dropmail.me</code>, <code>wasd@10mail.org</code>. You can only choose <code>Domain</code> of the address, but "login" part (the one that comes before <code>@</code>) is assigned by the server automatically and is always unique and belongs to you only. It's always attached to one of the <code>Session</code>s and it is able to receive mail as long as the Session it's attached to is not expired. If you think you may need to use this address in the future, you should save its <code>restoreKey</code> and use it later with <code>restoreAddress</code> operation.</dd>
+ 
+                    <dt>Mail</dt>
+                    <dd>Incoming email that arrived to one of the <code>Address</code>es and is stored inside the <code>Session</code>. When Session expires, email is removed from our server completely and forever. You can request different parts of the email (like it's plain <code>text</code>, <code>headerSubject</code>, <code>attachments</code> etc) or get whole <code>raw</code> MIME mail or <code>downloadUrl</code> to download the raw mail by HTTP.</dd>
+ 
+                    <dt>Attachment</dt>
+                    <dd>It's only defined when received <code>Mail</code> has any attachments and we were able to parse it. They can be accessed via <code>Mail.attachments</code> field.</dd>
+                </dl>
+ 
+                <h2 id="workflow">Workflow</h2>
+                <h3 id="create-session-single-random-address">Creating a Session with single random Address</h3>
+                <p>To create a new sessions, use <code>introduceSession</code> mutation.</p>
+                <p>Here we create a new <code>Session</code> with new random <code>Address</code> and asking the server to return session's id, expiration time and new <code>Address</code>es email address</p>
+                <pre><code class="language-graphql">
+mutation {
+    introduceSession {
+        id,
+        expiresAt,
+        addresses {
+          address
+        }
+    }
+}
+    </code></pre>
+                <p>the output of this query would look like this:</p>
+                <pre><code class="language-json">
+{
+  "data": {
+    "introduceSession": {
+      "id": "U2Vzc2lvbjqcMxamadJC_aLiPz_XL0lK",
+      "expiresAt": "2021-02-18T04:20:00+00:00",
+      "addresses": [
+        {
+          "address": "example@10mail.org"
+        }
+      ]
+    }
+  }
+}
+    </code></pre>
+                <p>From now on, you can send mail to <i>example@10mail.org</i> and server would store it inside the Session with ID <i>"U2Vzc2lvbjqcMxamadJC_aLiPz_XL0lK"</i>.</p>
+                <p><code>"expiresAt": "2021-02-18T04:20:00+00:00"</code> means that this session would self-destruct at this moment (it's always in the future time), unless something happens with it (some query reads from it, or new email received). Each time session is accessed, its <code>expiresAt</code> is extended. So, in theory, it may stay alive forever.</p>
+ 
+                <h3 id="fetch-incoming-mail">Fetching the incoming mail</h3>
+                <p>To check for the incoming mail, you have two options</p>
+                <ul>
+                    <li>Periodical polling - periodically (eg, once every 10 second) inspect the contents of the Session using <code>session(id)</code> or <code>sessions</code> query (easier, less efficient)</li>
+                    <li>Subscriptions - to use <code>sessionMailReceived</code> subscription (advanced, more efficient)</li>
+                </ul>
+                <h4>Periodical polling (basic)</h4>
+                <p>Here we are requesting all (up to 100) mails for a specific session.</p>
+                <pre><code class="language-graphql">
+query {
+    session(id: "U2Vzc2lvbjqcMxamadJC_aLiPz_XL0lK") {
+        mails{
+            rawSize,
+            fromAddr,
+            toAddr,
+            downloadUrl,
+            text,
+            headerSubject
+        }
+    }
+}
+    </code></pre>
+                <p>This query would return an empty array when there are no mails:</p>
+                <pre><code class="language-json">
+{
+  "data": {
+    "session": {
+      "mails": []
+    }
+  }
+}
+    </code></pre>
+                <p>And would return a <code>Mail</code> object for each received email, when there are some:</p>
+                <pre><code class="language-json">
+{
+  "data": {
+    "session": {
+      "mails": [
+        {
+          "toAddr": "example@10mail.org",
+          "text": "Hello\r\n",
+          "rawSize": 812,
+          "headerSubject": "Hello",
+          "fromAddr": "test@example.com",
+          "downloadUrl": "https://dropmail.me/download/mail/gql:1:9c3316a6-69d2-42fd-a2e2-3f3fd72f494a/vb18co6tn6b4pv10hgr7lhaljcnrhvk5"
+        }
+      ]
+    }
+  }
+}
+    </code></pre>
+                <p>If session has already expired, <code>null</code> will be returned instead.</p>
+                <pre><code class="language-json">
+{
+  "data": {
+    "session": null
+  },
+  "errors": [
+    {
+      "path": ["session"],
+      "message": "session_not_found",
+      "extensions": {
+        "code": "SESSION_NOT_FOUND"
+      }
+    }
+  ]
+}
+    </code></pre>
+                <p id="mails-after-id">When you plan to receive multiple emails with the same session, it's recommended to use <code>mailsAfterId(mailId: ID)</code> field. When no <code>mailId</code> provided, it returns the same results as <code>mails</code>. But when some existing <code>mailId</code> is specified, it would only return mails, received after this <code>mailId</code>.</p>
+                <p>So, when you start the session, first you query <code>mailsAfterId</code> without <code>mailId</code> (or just <code>mails</code>), asking it to return <code>Mail.id</code> as well. When you recieve your first mail, you'll call <code>mailsAfterId</code> with received mail's <code>id</code> as a parameter, so, only new - unread mail will be returned.</p>
+ 
+                <h4 id="subscriptions">Subscriptions (advanced)</h4>
+                <p>The benefit of subscriptions is that you don't have to keep sending requests periodically to see if there is a new mail, but the server notifies you immediately when there is a new mail. To use subscriptions you need to rely on more advanced techniques. There are 3 alternatives:</p>
+                <ul>
+                    <li>Subscription via HTTP long-polling</li>
+                    <li>Subscription via HTTP multipart/mixed streaming</li>
+                    <li>Subscription via WebSocket</li>
+                </ul>
+                All three methods need to call the same GraphQL command:
+                <pre><code class="language-graphql">
+subscription {
+    sessionMailReceived(id: "U2Vzc2lvbjqcMxamadJC_aLiPz_XL0lK") {
+        rawSize,
+        fromAddr,
+        toAddr,
+        downloadUrl,
+        text,
+        headerSubject
+    }
+}
+    </code></pre>
+                <p>To use this command with long-polling method you run it the same way as with any other command, however the server will not reply immediately, but will block until mail is received (up to 3 minutes). It can only return one mail at a time with this method and it always returns the first received mail by default. To get the next one, you need to add <code>mailsAfterId</code> parameter (works the same way as <a href="#mails-after-id">Query.mailsAfterId</a>).</p>
+                <p>To use it with multipart/mixed streaming, you need to add <code>Accept: multipart/mixed</code> HTTP request header. In that case the received emails will be streamed as <a href="https://datatracker.ietf.org/doc/html/rfc1521#section-7.2.2">multipart/mixed</a> document that contains <code>application/json</code> bodies per-email. It means you would need a MIME parser to extract the data.</p>
+                <p>To use it with WebSocket (recommended) you need to use a <a href="https://graphql.org/code/">GraphQL client library</a> that supports WebSocket transport. Please consult your library's documentation for details.</p>
+ 
+                <h3 id="custom-address">Custom addresses</h3>
+                <p>You can create a new session without <code>Address</code> or with one initial <code>Address</code> (that has random or specific <code>Domain</code>). And you can always add more <code>Address</code>es (with random or specific <code>Domain</code>) to the <code>Session</code> later.</p>
+                <p>You can't choose the login/username part of the address! It's always unique and generated by the server.</p>
+                <p>Anyway, first you would need to read the list of all the available domains and their IDs (IDs never change, so you can cache them locally; we add new ones from time to time):</p>
+                <pre><code class="language-graphql">
+query {
+    domains {
+        id,
+        name,
+        availableVia,
+        expiresAt
+    }
+}
+    </code></pre>
+                <p>Result:</p>
+                <pre><code class="language-json">
+{
+  "data": {
+    "domains": [
+      {
+        "name": "dropmail.me",
+        "id": "RG9tYWluOjE=",
+        "availableVia": ["API", "TELEGRAM", "WEB"],
+        "expiresAt": null
+      },
+      {
+        "name": "10mail.org",
+        "id": "RG9tYWluOjI=",
+        "availableVia": ["API", "TELEGRAM", "WEB"],
+        "expiresAt": "2028-06-01T00:00:00+00:00"
+      },
+      <..>
+    ]
+  }
+}
+    </code></pre>
+                <p>Then you may create a new session with specific domain:</p>
+                <pre><code class="language-graphql">
+mutation {
+    introduceSession(input: {withAddress: true,
+                             domainId: "RG9tYWluOjE="}) {
+        id,
+        addresses {
+          address
+        }
+    }
+}
+    </code></pre>
+                <p>Or create an empty session and add more addresses later:</p>
+                <pre><code class="language-graphql">
+mutation {
+    introduceSession(input: {withAddress: false}) {
+        id
+    }
+}
+ 
+mutation {
+    introduceAddress(input: {sessionId: "U2Vzc2lvbjqcMxamadJC_aLiPz_XL0lK"}) {
+        address,
+        restoreKey
+    }
+}
+ 
+mutation {
+    introduceAddress(input: {sessionId: "U2Vzc2lvbjqcMxamadJC_aLiPz_XL0lK",
+                             domainId: "RG9tYWluOjE="}) {
+        address,
+        restoreKey
+    }
+}
+    </code></pre>
+                <p id="rotating-domains">Some domains are <em>rotating</em> — they have a <code>Domain.expiresAt</code> and will stop working at some point. If you need a long-lived address, either pass <code>permanentDomainOnly: true</code> to <code>introduceSession</code> or <code>introduceAddress</code> to get a permanent domain, or query <code>domains</code> with <code>expiresAt</code> and pick one with a far enough expiry date:</p>
+                <pre><code class="language-graphql">
+mutation {
+    introduceSession(input: {withAddress: true,
+                             permanentDomainOnly: true}) {
+        id,
+        addresses {
+          address,
+          domain { name, expiresAt }
+        }
+    }
+}
+    </code></pre>
+                <p>Likewise, <code>domains(permanentOnly: true)</code> returns only permanent domains when you want to present a filtered list to the user.</p>
+ 
+                <h3 id="personal-domains">Personal domains</h3>
+                <p>In case public dropmail domains don't work for you (eg, they all are banned), you may register your own domain with DropMail and use it the same way you use
+                    any other DropMail domain.
+                </p>
+                <div class="alert alert-warning">
+                    This domain is bound to your <code>${AUTH_TOKEN}</code>! If you loose your <code>${AUTH_TOKEN}</code>, you won't be able to use and manage your domain!
+                </div>
+                <div class="alert alert-info">
+                    Personal domains are tied to your token's <em>identity</em>, not to the token string itself.
+                    You can safely <a href="#get-token">renew your token</a> and retain access to your domains.
+                    Your domain is <strong>private</strong> — it is only visible in the <code>domains</code> query when called with your token,
+                    and only your token can create addresses on it. Other DropMail users cannot see or use your domain.
+                </div>
+                <p>
+                    To use your own domain with DropMail, you should do 2 steps:
+                <ol>
+                    <li>Set-up MX DNS records on your domain</li>
+                    <li>Call <code>addDomain</code> mutation</li>
+                </ol>
+                </p>
+                <p>
+                    For DNS there are 2 options: the easiest one is to add <code>@ MX 10 mx.dropmail.me</code> and <code>* MX 10 mx.dropmail.me</code> records to your domain (<code>mx.10mail.org</code> is also allowed).
+                    For example, if your domain is <code>example.com</code>, then MX records for example.com as well as any subdomain of example.com should point to <code>mx.dropmail.me</code>.
+                    Such that <code>nslookup -type=MX example.com</code> as well as <code>nslookup -type=MX blabla.example.com</code> should report <code>mx.dropmail.me</code>.
+                    Another option is that MX records for your domain and subdomains point to whatever domain that resolves to the same IPv4 (required) and IPv6 (optional) as <code>mx.dropmail.me</code>. We don't change MX IPs often, however it's going to be your responsibility to monitor the change - we won't send any notifications!
+                </p>
+                <p>
+                    When DNS is ready, you should call <code>addDomain</code> mutation. This mutation validates that your domain has correct DNS setup and if it succeeds, it returns the <code>Domain</code> object. If DNS validation fails, you need to correct the reported error and try again, however you may have to wait for DNS TTL to expire.
+                    This mutation requires that you provide some password that you should remember - it would be needed if you decide to unregister the domain with <code>deleteDomain</code>.
+                </p>
+                <pre><code class="language-graphql">
+mutation {
+  addDomain(input: {name: "example.com",
+                    adminPassword: "my-secret-password"}) {
+    id,
+    name,
+    availableVia
+  }
+}
+    </code></pre>
+                <p>Result:</p>
+                <pre><code class="language-json">
+{
+  "data": {
+    "addDomain": {
+        "id": "RG9tYWluOjX=",
+        "name": "example.com",
+        "availableVia": ["API"]
+      }
+  }
+}
+    </code></pre>
+ 
+                <p>
+                    After that you may use this domain ID with <code>introduceAddress(input: {domainId: "RG9tYWluOjX=", sessionId: "..."})</code>. It would be visible in <code>domains</code> query.
+                    And also <code>introduceAddress()</code> and <code>introduceSession()</code> mutations with random domain would randomly draw your personal domain along with public ones.
+                </p>
+ 
+                <p>
+                    To unregister your personal domain, make sure you use the same <code>${AUTH_TOKEN}</code> and <code>adminPassword</code> and call <code>deleteDomain</code> mutation.
+                </p>
+                <pre><code class="language-graphql">
+mutation {
+  deleteDomain(input: {id: "RG9tYWluOjX=",
+                       adminPassword: "my-secret-password"})
+}
+    </code></pre>
+ 
+                <h4>Ongoing DNS health checks</h4>
+                <p>
+                    After your domain is added, DropMail periodically re-validates the DNS configuration (approximately every 15 minutes).
+                    The domain's <code>health</code> field reflects the current status:
+                </p>
+                <dl>
+                    <dt><code>OK</code></dt>
+                    <dd>Last check passed — normal state.</dd>
+                    <dt><code>FAILING</code></dt>
+                    <dd>Last check failed; domain is still offered for address creation (one failure so far).</dd>
+                    <dt><code>BROKEN</code></dt>
+                    <dd>Two or more consecutive failures; domain is <strong>no longer offered</strong> for new addresses until DNS is fixed and the next check passes.</dd>
+                </dl>
+                <p>
+                    Broken domains are excluded from the <code>domains</code> query by default.
+                    Pass <code>includeBroken: true</code> to also see them — useful for checking your domain's health status:
+                </p>
+                <pre><code class="language-graphql">
+query {
+  domains(includeBroken: true) {
+    name
+    health
+    healthCheckError
+  }
+}
+    </code></pre>
+                <p>
+                    If your domain becomes <code>FAILING</code> or <code>BROKEN</code>, query the <code>healthCheckError</code> field —
+                    it describes exactly what's wrong with the DNS configuration (e.g. missing MX record or incorrect target).
+                    Fix the DNS records as described in the setup section above, then wait for the next automatic check (up to ~15 minutes).
+                    Once the check passes, the domain will automatically return to <code>OK</code> and resume being offered for new addresses —
+                    no API call is required.
+                </p>
+ 
+ 
+                <h2 id="errors">Errors</h2>
+ 
+                <h3 id="errors-http">HTTP 403 — authentication errors</h3>
+                <p>These are returned before any GraphQL is evaluated, as a <code>403 Forbidden</code>
+                    response with a GraphQL-style JSON error body
+                    (<code>{"errors":[{"message":"...", "extensions":{"code":"authentication_error"}}]}</code>).</p>
+                <dl>
+                    <dt><code>token_expired</code></dt>
+                    <dd>Your <code>af_…</code> token has passed its expiry date. <a href="#get-token">Generate a new one.</a></dd>
+ 
+                    <dt><code>legacy_token_disabled</code></dt>
+                    <dd>Legacy arbitrary-string tokens are no longer accepted. <a href="#get-token">Generate a free <code>af_…</code> token</a> instead.</dd>
+ 
+                    <dt>any other reason</dt>
+                    <dd>Token is missing, too short, or has an invalid signature. Double-check that you're passing the correct token in the URL.</dd>
+                </dl>
+ 
+                <h3 id="errors-graphql">GraphQL errors</h3>
+                <p>Returned inside the standard <code>errors[]</code> array. Each error has an <code>extensions.code</code> field:</p>
+                <p>Always check whether the response contains an <code>errors</code> field and handle it before processing <code>data</code>. Some errors (e.g. <code>SESSION_NOT_FOUND</code>) are permanent — retrying the same request will not help.</p>
+                <dl>
+                    <dt><code>SESSION_NOT_FOUND</code></dt>
+                    <dd>The session has expired or never existed. Sessions live for at least 10 minutes, extended on every access. Once gone, the session and all its mail are deleted permanently — create a new session instead of retrying. If you saved the <code>restoreKey</code> for any of the addresses, you can restore them into a new session using the <code>restoreAddress</code> mutation.</dd>
+ 
+                    <dt><code>RATE_LIMIT_EXCEEDED</code></dt>
+                    <dd>Request quota exceeded. The error always includes an <code>extensions.captcha</code> field — interactive clients may show a captcha challenge; automated scripts should simply slow down. See <a href="#rate-limiting">Rate Limiting</a> below for details.</dd>
+ 
+                    <dt><code>DOMAIN_NOT_FOUND</code></dt>
+                    <dd>The requested email domain is no longer available for new address registration — it may have been deactivated or rotated out. Returned by <code>introduceAddress</code> and <code>introduceSession</code> when a specific <code>domainId</code> is provided but the domain is not accepting new addresses. If you previously held an address on that domain and saved its <code>restoreKey</code>, try <code>restoreAddress</code> — though if the domain is fully retired it will also fail.</dd>
+ 
+                    <dt><code>resolver_error</code></dt>
+                    <dd>Catch-all for other resolver errors. The <code>message</code> field contains a machine-readable reason. Common values from personal-domain mutations: <code>unknown_domain</code>, <code>invalid_domain_name</code>, <code>password_too_short</code>, <code>malformed_password</code>.</dd>
+                </dl>
+ 
+                <h3 id="rate-limiting">Rate Limiting</h3>
+                <p>To protect the service from abuse, the API implements rate limiting on address creation and mail reception.</p>
+ 
+                <p>When rate limits are exceeded, address creation mutations will return an error, and mail access (queries/subscriptions) will return <code>null</code> with an error. Active subscriptions will be terminated with an error notification.</p>
+ 
+                <p><b>Example error response:</b></p>
+                <pre><code class="language-json">{
+  "data": {
+    "session": {
+      "id": "U2Vzc2lvbjphYmNkZWY=",
+      "mails": null
+    }
+  },
+  "errors": [{
+    "message": "Request quota exceeded",
+    "path": ["session", "mails"],
+    "extensions": {
+      "code": "RATE_LIMIT_EXCEEDED",
+      "captcha": {…}
+    }
+  }]
+}</code></pre>
+ 
+                <p><b>What to do:</b> Simply slow down your requests. Rate limits are based on sliding time windows, so adding reasonable delays between operations (e.g., 1-2 seconds) will prevent issues. The API is designed for programmatic access with significantly more generous limits than you would experience accessing the website directly, but please use it responsibly.</p>
+ 
+                <p><small>Note: For interactive clients the <code>extensions.captcha</code> field contains a captcha challenge — solving it grants extra quota credits.</small></p>
+ 
+                <h2 id="live-demo">Try it from your browser!</h2>
+                <p>Here you can try to query our API right from your browser.</p>
+                <p><label>Your API token: <input type="text" data-bind="textInput: token, css: {'is-invalid': noToken}" /></label> <small class="text-muted">(<a href="#get-token">generate a free token</a> or paste your own <code>af_…</code> token)</small></p>
+                <!-- ko if: noToken -->
+                <div class="alert alert-warning py-2">No token set — please <a href="#get-token">generate a free token</a> or paste an <code>af_…</code> token above.</div>
+                <!-- /ko -->
+ 
+                <h3 id="list-domains">List domains</h3>
+                <div>
+                    <pre><code class="language-json" data-bind="text: json(listDomains.query)"></code></pre>
+                    <p class="demo-url">
+                        <a href="#" target="_blank" data-bind="attr: {'href': listDomains.url}, text: listDomains.url">todo</a>
+                    </p>
+                    <div class="accordion" data-bind="foreach: listDomains.snippets, attr: {'id': listDomains.id}">
+                        <div class="accordion-item">
+                            <div class="accordion-header" data-bind="attr: {'id': idHead}">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" aria-expanded="false" data-bind="attr: {'data-bs-target': '#' + idTarget, 'aria-controls': idTarget}, text: name">
+                                </button>
+                            </div>
+                            <div class="accordion-collapse collapse" data-bind="attr: {'id': idTarget, 'aria-labaledby': idHead, 'data-bs-parent': '#' + $parent.listDomains.id}">
+                                <div class="accordion-body">
+                                    <pre><code data-bind="text: text, attr: {'class': 'language-' + lang}"></code></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-primary run" data-bind="click: listDomains.run">Run</button>
+                    <pre><code class="language-json" data-bind="text: json(listDomains.result)"></code></pre>
+                </div>
+ 
+                <h3 id="introduce-session">Introduce session</h3>
+                <p>This request would return a new email address as <code>data.introduceSession.addresses[0].address</code>, you can try to send emails to it!</p>
+                <div>
+                    <pre><code class="language-json" data-bind="text: json(introduceSession.query)"></code></pre>
+                    <p class="demo-url">
+                        <a href="#" target="_blank" data-bind="attr: {'href': introduceSession.url}, text: introduceSession.url">todo</a>
+                    </p>
+                    <div class="accordion" data-bind="foreach: introduceSession.snippets, attr: {'id': introduceSession.id}">
+                        <div class="accordion-item">
+                            <div class="accordion-header" data-bind="attr: {'id': idHead}">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" aria-expanded="false" data-bind="attr: {'data-bs-target': '#' + idTarget, 'aria-controls': idTarget}, text: name">
+                                </button>
+                            </div>
+                            <div class="accordion-collapse collapse" data-bind="attr: {'id': idTarget, 'aria-labaledby': idHead, 'data-bs-parent': '#' + $parent.introduceSession.id}">
+                                <div class="accordion-body">
+                                    <pre><code data-bind="text: text, attr: {'class': 'language-' + lang}"></code></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-primary run" data-bind="click: introduceSession.run">Run</button>
+                    <pre><code class="language-json" data-bind="text: json(introduceSession.result)"></code></pre>
+                </div>
+                <div class="alert alert-success" role="alert" data-bind="visible: mailAddress">
+                    Great! Now try to <a href="" data-bind="attr: {'href': 'mailto:' + mailAddress()}">send email</a> to <b class="user-select-all" data-bind="text: mailAddress"></b>!
+                </div>
+                <p>What is your <b><label for="session-id">Session ID</label></b>? (<code>data.introduceSession.id</code>):
+                    <input id="session-id" type="text" placeholder="U2Vzc2lvbjrrQW5N…" class="form-control" data-bind="textInput: sessionId" />
+                </p>
+ 
+                <h3 id="list-all-sessions">List all sessions</h3>
+                <p>You can see all your non-expired sessions, even when you forgot to save the Session ID.</p>
+                <div>
+                    <pre><code class="language-json" data-bind="text: json(querySessions.query)"></code></pre>
+                    <p class="demo-url">
+                        <a href="#" target="_blank" data-bind="attr: {'href': querySessions.url}, text: querySessions.url">todo</a>
+                    </p>
+                    <div class="accordion" data-bind="foreach: querySessions.snippets, attr: {'id': querySessions.id}">
+                        <div class="accordion-item">
+                            <div class="accordion-header" data-bind="attr: {'id': idHead}">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" aria-expanded="false" data-bind="attr: {'data-bs-target': '#' + idTarget, 'aria-controls': idTarget}, text: name">
+                                </button>
+                            </div>
+                            <div class="accordion-collapse collapse" data-bind="attr: {'id': idTarget, 'aria-labaledby': idHead, 'data-bs-parent': '#' + $parent.querySessions.id}">
+                                <div class="accordion-body">
+                                    <pre><code data-bind="text: text, attr: {'class': 'language-' + lang}"></code></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-primary run" data-bind="click: querySessions.run">Run</button>
+                    <pre><code class="language-json" data-bind="text: json(querySessions.result)"></code></pre>
+                </div>
+ 
+                <h3 id="add-another-address">Add one more address to the session</h3>
+                <p>You can have multiple addresses attached to the session.</p>
+                <div data-bind="if: introduceAddress.ready">
+                    <p>
+                        <label>
+                            You can choose a specific domain
+                            <select class="form-select" data-bind="options: domains,
+            optionsText: 'name',
+            value: selectedDomain,
+            valueAllowUnset: false"></select>
+                        </label> Make sure you <a href="#list-domains">run <code>query {domains}</code></a> before, so you know the correct <code>Domain.id</code>.
+                    </p>
+                    <pre><code class="language-json" data-bind="text: json(introduceAddress.query)"></code></pre>
+                    <p class="demo-url">
+                        <a href="#" target="_blank" data-bind="attr: {'href': introduceAddress.url}, text: introduceAddress.url">todo</a>
+                    </p>
+                    <div class="accordion" data-bind="foreach: introduceAddress.snippets, attr: {'id': introduceAddress.id}">
+                        <div class="accordion-item">
+                            <div class="accordion-header" data-bind="attr: {'id': idHead}">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" aria-expanded="false" data-bind="attr: {'data-bs-target': '#' + idTarget, 'aria-controls': idTarget}, text: name">
+                                </button>
+                            </div>
+                            <div class="accordion-collapse collapse" data-bind="attr: {'id': idTarget, 'aria-labaledby': idHead, 'data-bs-parent': '#' + $parent.introduceAddress.id}">
+                                <div class="accordion-body">
+                                    <pre><code data-bind="text: text, attr: {'class': 'language-' + lang}"></code></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-primary run" data-bind="click: introduceAddress.run">Run</button>
+                    <pre><code class="language-json" data-bind="text: json(introduceAddress.result)"></code></pre>
+                </div>
+                <div data-bind="visible: !introduceAddress.ready()" class="alert alert-warning">
+                    <a href="#session-id">Session ID</a> missing!
+                </div>
+ 
+                <h3 id="query-specific-session">Query a specific session</h3>
+                <p>Call this API periodically to fetch incoming mail.</p>
+                <div data-bind="if: querySession.ready">
+                    <pre><code class="language-json" data-bind="text: json(querySession.query)"></code></pre>
+                    <p class="demo-url">
+                        <a href="#" target="_blank" data-bind="attr: {'href': querySession.url}, text: querySession.url">todo</a>
+                    </p>
+                    <div class="accordion" data-bind="foreach: querySession.snippets, attr: {'id': querySession.id}">
+                        <div class="accordion-item">
+                            <div class="accordion-header" data-bind="attr: {'id': idHead}">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" aria-expanded="false" data-bind="attr: {'data-bs-target': '#' + idTarget, 'aria-controls': idTarget}, text: name">
+                                </button>
+                            </div>
+                            <div class="accordion-collapse collapse" data-bind="attr: {'id': idTarget, 'aria-labaledby': idHead, 'data-bs-parent': '#' + $parent.querySession.id}">
+                                <div class="accordion-body">
+                                    <pre><code data-bind="text: text, attr: {'class': 'language-' + lang}"></code></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-primary run" data-bind="click: querySession.run">Run</button>
+                    <pre><code class="language-json" data-bind="text: json(querySession.result)"></code></pre>
+                </div>
+                <div data-bind="visible: !querySession.ready()" class="alert alert-warning">
+                    <a href="#session-id">Session ID</a> missing!
+                </div>
+ 
+                <h3 id="subscribe-to-session-mail">Subscribe to new session mail</h3>
+                <p>Use subscriptions to let server notify you about new mail.</p>
+                <div data-bind="if: subscribeSession.ready">
+                    <pre><code class="language-json" data-bind="text: json(subscribeSession.query)"></code></pre>
+                    <p class="demo-url">
+                        <a href="#" target="_blank" data-bind="attr: {'href': subscribeSession.url}, text: subscribeSession.url">todo</a>
+                    </p>
+                    <div class="accordion" data-bind="foreach: subscribeSession.snippets, attr: {'id': subscribeSession.id}">
+                        <div class="accordion-item">
+                            <div class="accordion-header" data-bind="attr: {'id': idHead}">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" aria-expanded="false" data-bind="attr: {'data-bs-target': '#' + idTarget, 'aria-controls': idTarget}, text: name">
+                                </button>
+                            </div>
+                            <div class="accordion-collapse collapse" data-bind="attr: {'id': idTarget, 'aria-labaledby': idHead, 'data-bs-parent': '#' + $parent.subscribeSession.id}">
+                                <div class="accordion-body">
+                                    <pre><code data-bind="text: text, attr: {'class': 'language-' + lang}"></code></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-primary run" data-bind="click: subscribeSession.run, enable: subscribeSession.runnable">Run</button> (it will block until there is a mail at <b class="user-select-all" data-bind="text: mailAddress"></b>).
+                    <pre><code class="language-json" data-bind="text: json(subscribeSession.result)"></code></pre>
+                </div>
+                <div data-bind="visible: !subscribeSession.ready()" class="alert alert-warning">
+                    <a href="#session-id">Session ID</a> missing!
+                </div>
+ 
+                <h3 id="query-editor">Try your own query</h3>
+                <p>
+                    Here you can edit your own query and run it.
+                    <label for="query-edit-select">Or edit one of example queries:</label>
+                    <select id="query-edit-select" class="form-select" data-bind="options: queryEdit.select,
+        optionsText: 'name',
+        value: queryEdit.selected,
+        valueAllowUnset: true,
+        optionsCaption: 'Choose example…'"></select>
+                </p>
+                <div>
+                    <form>
+                        <div class="mb-3">
+                            <label for="query-edit-query">GraphQL query</label>
+                            <textarea id="query-edit-query" class="form-control" rows="10" data-bind="textInput: queryEdit.query" required></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label for="query-edit-variables">Variables (JSON)</label>
+                            <textarea id="query-edit-variables" class="form-control" rows="7" data-bind="textInput: queryEdit.variables"></textarea>
+                        </div>
+                        <div class="alert alert-warning" data-bind="text: queryEdit.error, visible: queryEdit.error"></div>
+                        <div class="mb-3">
+                        </div>
+                    </form>
+                    <p class="demo-url">
+                        <a href="#" target="_blank" data-bind="attr: {'href': queryEditor.url}, text: queryEditor.url">todo</a>
+                    </p>
+                    <div class="accordion" data-bind="foreach: queryEditor.snippets, attr: {'id': queryEditor.id}">
+                        <div class="accordion-item">
+                            <div class="accordion-header" data-bind="attr: {'id': idHead}">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" aria-expanded="false" data-bind="attr: {'data-bs-target': '#' + idTarget, 'aria-controls': idTarget}, text: name">
+                                </button>
+                            </div>
+                            <div class="accordion-collapse collapse" data-bind="attr: {'id': idTarget, 'aria-labaledby': idHead, 'data-bs-parent': '#' + $parent.queryEditor.id}">
+                                <div class="accordion-body">
+                                    <pre><code data-bind="text: text, attr: {'class': 'language-' + lang}"></code></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-primary run" data-bind="click: queryEditor.run">Run</button>
+                    <pre><code class="language-json" data-bind="text: json(queryEditor.result)"></code></pre>
+                </div>
+ 
+                <h2 id="code-examples">Code examples</h2>
+                <p>Here we are using CURL command line utility to query the API.</p>
+                <h3 id="curl-new-session-with-random-address">Creating a new session with random email address</h3>
+                <pre><code class="language-bash">
+$ curl --silent -H "Content-Type: application/x-www-form-urlencoded" https://dropmail.me/api/graphql/MY_TOKEN -d 'query=mutation {introduceSession {id, expiresAt, addresses{id, address}}}' | jq
+{
+  "data": {
+    "introduceSession": {
+      "id": "U2Vzc2lvbjqcMxamadJC_aLiPz_XL0lK",
+      "expiresAt": "2021-02-18T01:40:02+00:00",
+      "addresses": [
+        {
+          "id": "QWRkcmVzczqcMxamadJC_aLiPz_XL0lKOmRyb2ZAMTBtYWlsLm9yZw",
+          "address": "example@10mail.org"
+        }
+      ]
+    }
+  }
+}
+    </code></pre>
+                <p>Now "example@10mail.org" is active and it can receive emails.</p>
+                <h3 id="curl-fetching-received-mail">Fetching received emails</h3>
+                <p>Use periodic polling or <a href="#subscriptions">subscriptions</a> to receive incoming mail.</p>
+                <pre><code class="language-bash">
+$ curl --silent https://dropmail.me/api/graphql/MY_TOKEN -d 'query=query ($id: ID!) {session(id:$id) {id, expiresAt, mails{id, rawSize, raw, fromAddr, toAddr, receivedAt, downloadUrl, toAddrOrig, decodeStatus, text, headerFrom, headerSubject, html}, addresses{id, address, restoreKey} }}&variables={"id": "U2Vzc2lvbjqcMxamadJC_aLiPz_XL0lK"}' | jq
+{
+  "data": {
+    "session": {
+      "mails": [
+        {
+          "toAddrOrig": "example@10mail.org",
+          "toAddr": "example@10mail.org",
+          "text": "Hello\r\n",
+          "receivedAt": "2021-02-18T01:30:17+00:00",
+          "rawSize": 812,
+          "raw": "MIME-Version: 1.0\r\nMessage-ID: <test@mail.example.com>\r\nSubject: Hello\r\nFrom: Hello <test@example.com>\r\nTo: aonfmqcpw@example.com\r\nContent-Type: text/plain; charset=US-ASCII\r\n\r\nHello\r\n",
+          "id": "TWFpbDqcMxamadJC/aLiPz/XL0lKOnZiMThjbzZ0bjZiNHB2MTBoZ3I3bGhhbGpjbnJodms1",
+          "html": null,
+          "headerSubject": "Hello",
+          "headerFrom": "Hello <test@example.com>",
+          "fromAddr": "test@example.com",
+          "downloadUrl": "https://dropmail.me/download/mail/gql:1:9c3316a6-69d2-42fd-a2e2-3f3fd72f494a/vb18co6tn6b4pv10hgr7lhaljcnrhvk5",
+          "decodeStatus": "OK"
+        }
+      ],
+      "id": "U2Vzc2lvbjqcMxamadJC_aLiPz_XL0lK",
+      "expiresAt": "2021-02-18T01:41:50+00:00",
+      "addresses": [
+        {
+          "restoreKey": "0c88ea831f8f71bf3885f2b5bddd6c371",
+          "id": "QWRkcmVzczqcMxamadJC_aLiPz_XL0lKOmRyb2ZAMTBtYWlsLm9yZw",
+          "address": "example@10mail.org"
+        }
+      ]
+    }
+  }
+}
+    </code></pre>
+                <p>Same, but more compact:</p>
+                <pre><code class="language-bash">
+$ curl --silent https://dropmail.me/api/graphql/MY_TOKEN -d 'query=query ($id: ID!) {session(id:$id) {mails{rawSize, fromAddr, toAddr, downloadUrl, text, headerSubject}} }&variables={"id": "U2Vzc2lvbjqcMxamadJC_aLiPz_XL0lK"}' | jq
+{
+  "data": {
+    "session": {
+      "mails": [
+        {
+          "toAddr": "example@10mail.org",
+          "text": "Hello\r\n",
+          "rawSize": 812,
+          "headerSubject": "Hello",
+          "fromAddr": "test@example.com",
+          "downloadUrl": "https://dropmail.me/download/mail/gql:1:9c3316a6-69d2-42fd-a2e2-3f3fd72f494a/vb18co6tn6b4pv10hgr7lhaljcnrhvk5"
+        }
+      ]
+    }
+  }
+}
+    </code></pre>
+                <h2 id="mcp">MCP (AI agents)</h2>
+                <p>
+                    <a href="https://modelcontextprotocol.io/">MCP (Model Context Protocol)</a> lets AI assistants
+                    call external tools. The <code>dropmail-mcp</code> package wraps this GraphQL API so agents can
+                    create temporary addresses and receive mail without writing any GraphQL themselves.
+                </p>
+ 
+                <h3 id="mcp-example">Example session</h3>
+                <p>Things you can ask your AI assistant:</p>
+                <ul>
+                    <li><em>"Give me a temp email and wait for the confirmation from example.com"</em></li>
+                    <li><em>"Sign me up for the newsletter at example.com using a throwaway address"</em></li>
+                    <li><em>"I need to sign up for a product trial on example.com — give me a .com temp email, wait for their email, and pull out the activation code"</em></li>
+                    <li><em>"Check if the password reset email has arrived and give me the link"</em></li>
+                </ul>
+                <pre class="bg-dark text-light p-3 rounded" style="font-size:0.85em; white-space:pre-wrap">❯ Give me a temp email — I need to sign up for a free trial
+ 
+◐ I'll create a temporary address with DropMail.
+ 
+● create_session
+  └ {"address":"tmpbox47@dropmail.me","restore_key":"a1b2c3…"}
+ 
+  Your temporary address: <b>tmpbox47@dropmail.me</b>
+  Save the restore key (a1b2c3…) if you want to recover it later.
+ 
+❯ Done, I submitted the form — please wait for the confirmation email
+ 
+● wait_for_email
+  └ {"arrived":true,"headerSubject":"Verify your email address","fromAddr":"noreply@example.com",…}
+ 
+  📬 Email arrived!
+  From:    Example Service <noreply@example.com>
+  Subject: Verify your email address
+  Preview: Please verify your email address to complete your registration. Use the…
+ 
+❯ What's the code?
+ 
+● read_email
+  └ {"text":"…Your verification code is 482-951. It expires in 10 minutes…","textSource":"HTML",…}
+ 
+  Your verification code is: <b>482-951</b></pre>
+ 
+                <p>Install with pip or pipx, then run:</p>
+                <pre><code class="language-bash">pip install dropmail-mcp   # or: pipx install dropmail-mcp
+dropmail-mcp --token YOUR_TOKEN</code></pre>
+                <p><small>You can also use <code>uvx dropmail-mcp --token YOUR_TOKEN</code> for a quick terminal test without installing, though <code>uvx</code> may not work reliably when launched as a subprocess by MCP clients — use pip/pipx for the configs below.</small></p>
+ 
+                <h3 id="mcp-setup">Configure your AI assistant</h3>
+ 
+                <ul class="nav nav-tabs" id="mcpClientTabs" role="tablist">
+                    <li class="nav-item">
+                        <a class="nav-link active" id="tab-claude" data-bs-toggle="tab" href="#mcp-claude" role="tab">Claude Desktop</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" id="tab-vscode" data-bs-toggle="tab" href="#mcp-vscode" role="tab">VS Code / Copilot IDE</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" id="tab-copilot-cli" data-bs-toggle="tab" href="#mcp-copilot-cli" role="tab">GitHub Copilot CLI</a>
+                    </li>
+                </ul>
+                <div class="tab-content border border-top-0 p-3 mb-3" id="mcpClientTabsContent">
+                    <div class="tab-pane fade show active" id="mcp-claude" role="tabpanel">
+                        <p>Add to <code>claude_desktop_config.json</code>:</p>
+                        <pre><code class="language-json">{
+  "mcpServers": {
+    "dropmail": {
+      "command": "dropmail-mcp",
+      "env": {
+        "DROPMAIL_TOKEN": "YOUR_TOKEN"
+      }
+    }
+  }
+}</code></pre>
+                    </div>
+                    <div class="tab-pane fade" id="mcp-vscode" role="tabpanel">
+                        <p>Add to <code>.vscode/mcp.json</code> in your workspace (VS Code 1.99+, agent mode):</p>
+                        <pre><code class="language-json">{
+  "servers": {
+    "dropmail": {
+      "type": "stdio",
+      "command": "dropmail-mcp",
+      "env": {
+        "DROPMAIL_TOKEN": "${input:dropmail-token}"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "id": "dropmail-token",
+      "type": "promptString",
+      "description": "DropMail API token (obtain at dropmail.me/api/)",
+      "password": true
+    }
+  ]
+}</code></pre>
+                        <p>VS Code will prompt for the token securely — it is never stored in plain text.</p>
+                    </div>
+                    <div class="tab-pane fade" id="mcp-copilot-cli" role="tabpanel">
+                        <p>Edit <code>~/.copilot/mcp-config.json</code> (create if it doesn't exist):</p>
+                        <pre><code class="language-json">{
+  "mcpServers": {
+    "dropmail": {
+      "command": "dropmail-mcp",
+      "env": {
+        "DROPMAIL_TOKEN": "${DROPMAIL_TOKEN}"
+      }
+    }
+  }
+}</code></pre>
+                        <p>
+                            Set <code>DROPMAIL_TOKEN</code> in your shell profile (<code>~/.bashrc</code>,
+                            <code>~/.zshrc</code>, etc.), or run <code>/mcp add</code> inside the Copilot CLI
+                            session to configure it interactively.
+                        </p>
+                    </div>
+                </div>
+ 
+                <h3 id="mcp-tools">Available tools</h3>
+                <table class="table table-sm table-bordered">
+                    <thead class="thead-light">
+                        <tr>
+                            <th>Tool</th>
+                            <th>What it does</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>list_domains</code></td>
+                            <td>List available <code>@domain</code> options</td>
+                        </tr>
+                        <tr>
+                            <td><code>create_session</code></td>
+                            <td>Create a session and get a temporary address</td>
+                        </tr>
+                        <tr>
+                            <td><code>get_session</code></td>
+                            <td>Check session state, addresses, and mail count</td>
+                        </tr>
+                        <tr>
+                            <td><code>get_inbox</code></td>
+                            <td>List received emails with subject and text preview</td>
+                        </tr>
+                        <tr>
+                            <td><code>wait_for_email</code></td>
+                            <td>Block until a new email arrives (up to 180 s)</td>
+                        </tr>
+                        <tr>
+                            <td><code>read_email</code></td>
+                            <td>Read full email: text body, attachments, download URLs</td>
+                        </tr>
+                        <tr>
+                            <td><code>add_address</code></td>
+                            <td>Add a second address to an existing session</td>
+                        </tr>
+                        <tr>
+                            <td><code>restore_address</code></td>
+                            <td>Restore an old address using its restore key</td>
+                        </tr>
+                        <tr>
+                            <td><code>delete_address</code></td>
+                            <td>Remove an address from a session</td>
+                        </tr>
+                    </tbody>
+                </table>
+ 
+                <h3 id="mcp-download">Download</h3>
+                <p>
+                    Available on <a href="https://pypi.org/project/dropmail-mcp/" target="_blank">PyPI</a> —
+                    the recommended way to install:
+                </p>
+                <pre><code class="language-bash">pip install dropmail-mcp</code></pre>
+                <p>Pre-built packages are also available for offline or air-gapped installs:</p>
+                <ul>
+                    <li>Wheel: <a href="/static/dist/dropmail_mcp-latest.whl"><code>dropmail_mcp-latest.whl</code></a></li>
+                    <li>Source: <a href="/static/dist/dropmail_mcp-latest.tar.gz"><code>dropmail_mcp-latest.tar.gz</code></a></li>
+                </ul>
+                <pre><code class="language-bash">pip install https://dropmail.me/static/dist/dropmail_mcp-latest.whl</code></pre>
+ 
+            </main>
+        </div>
+    </div>
+    <!-- Captcha modal for token generator/renewer -->
+    <div id="api-captcha-modal" class="modal fade" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <form data-bind="submit: captcha.submit">
+                    <fieldset data-bind="attr: {'disabled': captcha.submitting}">
+                        <div class="modal-header">
+                            <h4 class="modal-title">Captcha</h4>
+                        </div>
+                        <div class="modal-body">
+                            <div class="text-center" data-bind="if: captcha.visible">
+                                <img src="" data-bind="attr: {'src': captcha.url}" width="200" height="70" alt="captcha" />
+                                <span title="Try another image" style="cursor: pointer; font-size: 1.4rem; vertical-align: middle; padding: 0 .5rem" data-bind="click: captcha.reload">↻</span>
+                            </div>
+                            <div class="has-validation mt-2">
+                                <label for="api-captcha-text" class="control-label">Please enter the text you see in the picture</label>
+                                <input type="text" class="form-control" id="api-captcha-text" data-bind="css: {'is-invalid': captcha.isWrong}, textInput: captcha.response" />
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-primary" data-bind="click: captcha.submit">Submit</button>
+                        </div>
+                    </fieldset>
+                </form>
+            </div>
+        </div>
+    </div>
