@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "dropmail": {
+      "command": "dropmail-mcp",
+      "env": {
+        "DROPMAIL_TOKEN": "YOUR_TOKEN"
+      }
+    }
+  }
+}
