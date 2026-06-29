@@ -1,0 +1,10 @@
+query mailWithHtml($sanitizerConfig: HtmlSanitizerConfig) {
+  sessions {
+    mails {
+      fromAddr
+      headerSubject
+      text
+      sanitizedHtml(sanitizerConfig: $sanitizerConfig)
+    }
+  }
+}
