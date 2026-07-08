@@ -46,34 +46,9 @@ Web4 (codename "Aura") is a web application framework configured in `web4.nf` / 
 
 Create a `.env` file from this sample and fill values:
 
-APP_ENV=production
-APP_DEBUG=false
-APP_URL=http://localhost
-APP_KEY=base64:YOUR_APP_KEY_HERE
-
-DB_CONNECTION=pgsql
-DB_HOST=127.0.0.1
-DB_PORT=5432
-DB_DATABASE=web4
-DB_USERNAME=web4
-DB_PASSWORD=secret
-
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-REDIS_PASSWORD=null
-
-MAIL_DRIVER=smtp
-MAIL_HOST=smtp.example.com
-MAIL_PORT=587
-MAIL_USERNAME=null
-MAIL_PASSWORD=null
-MAIL_ENCRYPTION=tls
-
-AI_PROVIDER=web4-ai
-AI_ENDPOINT=/api/ai
-
-BLOCKCHAIN_NETWORK=mainnet
-
+```.env
+app.nf
+```
 (Adjust/add variables for your deployment, e.g., networking, secret managers, and third-party credentials.)
 
 ## Typical setup & run steps
